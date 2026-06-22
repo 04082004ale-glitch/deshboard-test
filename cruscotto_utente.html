@@ -1,0 +1,1697 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Indicatori di Performance dei Corsi di Studio | UniMC</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+  <!-- Firebase: riceve in tempo reale i dati pubblicati dall'ufficio -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
+    import { getFirestore, doc, getDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+
+    // ════════════════════════════════════════════════════════════
+    // CONFIGURAZIONE FIREBASE — deve essere IDENTICA a quella nel
+    // cruscotto_ufficio.html (stesso progetto Firebase)
+    // ════════════════════════════════════════════════════════════
+    const firebaseConfig = {
+      apiKey: "AIzaSyCZveHADauYRX_pYYpKFzUezDiA8A6fOnk",
+      authDomain: "cruscotto-unimc.firebaseapp.com",
+      projectId: "cruscotto-unimc",
+      storageBucket: "cruscotto-unimc.firebasestorage.app",
+      messagingSenderId: "376758501370",
+      appId: "1:376758501370:web:95839a701116042f7eee43"
+    };
+
+    try {
+      if (firebaseConfig.apiKey === "INSERISCI_API_KEY") {
+        throw new Error("Configurazione Firebase non ancora completata.");
+      }
+      const app = initializeApp(firebaseConfig);
+      const db = getFirestore(app);
+      const metaRef = doc(db, "cruscotto", "meta");
+      const chunksCol = collection(db, "cruscotto_chunks");
+
+      // Legge tutti i chunk pubblicati e li ricompone in un unico array
+      async function leggiTuttiIChunk(numChunk) {
+        let datiCompleti = [];
+        for (let i = 0; i < numChunk; i++) {
+          const chunkSnap = await getDoc(doc(chunksCol, "chunk_" + i));
+          if (chunkSnap.exists()) {
+            datiCompleti = datiCompleti.concat(chunkSnap.data().righe || []);
+          }
+        }
+        return datiCompleti;
+      }
+
+      // Si collega in tempo reale al documento "meta": ogni volta che l'ufficio
+      // pubblica dati nuovi, questa funzione viene richiamata automaticamente,
+      // poi scarica tutti i pezzi (chunk) e li ricompone.
+      window.firebaseAscoltaAggiornamenti = function(callback) {
+        onSnapshot(metaRef, async (snap) => {
+          if (!snap.exists()) {
+            callback(null, null);
+            return;
+          }
+          const meta = snap.data();
+          try {
+            const dati = await leggiTuttiIChunk(meta.numChunk || 0);
+            callback({
+              dati: dati,
+              fileName: meta.fileName,
+              pubblicatoIl: meta.pubblicatoIl
+            }, null);
+          } catch (errLettura) {
+            console.error("Errore lettura chunk:", errLettura);
+            callback(null, errLettura);
+          }
+        }, (errore) => {
+          console.error("Errore connessione dati condivisi:", errore);
+          callback(null, errore);
+        });
+      };
+
+      window.firebaseDisponibile = true;
+    } catch (e) {
+      console.error("Errore inizializzazione Firebase:", e);
+      window.firebaseDisponibile = false;
+    }
+  </script>
+
+  <style>
+    /* ─── RESET & BASE ─────────────────────────────────── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bordeaux: rgb(127,5,65);
+      --bordeaux-dark: rgb(90,3,45);
+      --bordeaux-light: rgba(127,5,65,0.08);
+      --bordeaux-mid: rgba(127,5,65,0.15);
+      --grey-bg: #f4f5f9;
+      --grey-border: #e2e5ed;
+      --text: #1a1d2e;
+      --text-light: #6b7280;
+      --white: #ffffff;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.05);
+      --shadow-md: 0 4px 16px rgba(0,0,0,0.09);
+      --shadow-lg: 0 8px 32px rgba(0,0,0,0.12);
+      --radius: 14px;
+      --radius-sm: 8px;
+    }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--grey-bg);
+      min-height: 100vh;
+      color: var(--text);
+      font-size: 18px;
+      line-height: 1.55;
+    }
+    .app { width: 100%; padding: 0; }
+    .inner { max-width: 1400px; margin: 0 auto; padding: 28px 24px 60px; }
+
+    /* ─── HEADER ────────────────────────────────────────── */
+    .header {
+      background: var(--bordeaux);
+      border-radius: 0;
+      padding: 22px 40px;
+      margin-bottom: 0;
+      box-shadow: var(--shadow-md);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+    }
+    .header-logo-wrap {
+      background: white;
+      border-radius: 10px;
+      padding: 10px 22px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    .header-logo-wrap img { height: 72px; object-fit: contain; display: block; }
+    .header-tagline {
+      color: rgba(255,255,255,0.75);
+      font-size: 18px;
+      font-style: italic;
+      text-align: right;
+    }
+
+    /* ─── SECTIONS ──────────────────────────────────────── */
+    .section { display: none; }
+
+    /* ─── HOME ──────────────────────────────────────────── */
+    .home-hero {
+      text-align: center;
+      padding: 40px 20px 32px;
+    }
+    .home-title {
+      color: var(--bordeaux);
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+      margin-bottom: 8px;
+      line-height: 1.25;
+    }
+    .home-subtitle {
+      color: var(--text-light);
+      font-size: 18px;
+      max-width: 400px;
+      margin: 0 auto 36px;
+    }
+    .status-empty {
+      background: var(--bordeaux-light);
+      border: 1px dashed var(--bordeaux);
+      border-radius: var(--radius-sm);
+      color: var(--bordeaux);
+      padding: 14px 20px;
+      text-align: center;
+      font-size: 17px;
+      margin-bottom: 28px;
+    }
+    .home-cards { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; }
+    .home-card {
+      background: var(--white);
+      border: 2px solid var(--grey-border);
+      border-radius: var(--radius);
+      padding: 28px 24px 24px;
+      width: 220px;
+      cursor: pointer;
+      box-shadow: var(--shadow-sm);
+      transition: all 0.2s ease;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .home-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 4px;
+      background: var(--bordeaux);
+      transform: scaleX(0);
+      transition: transform 0.2s ease;
+      transform-origin: left;
+    }
+    .home-card:hover { background: var(--bordeaux); border-color: var(--bordeaux); box-shadow: var(--shadow-md); transform: translateY(-3px); }
+    .home-card:hover::before { transform: scaleX(1); }
+    .home-card:hover .card-label { color: #fff; }
+    .home-card:hover .card-desc { color: rgba(255,255,255,0.8); }
+    .card-icon { font-size: 28px; margin-bottom: 12px; }
+    .card-label { font-size: 17px; font-weight: 700; color: var(--text); margin-bottom: 6px; transition: color 0.2s; }
+    .card-desc { font-size: 18px; color: var(--text-light); line-height: 1.45; }
+
+    /* ─── BACK / NAV BUTTONS ────────────────────────────── */
+    .back-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: none; border: none;
+      color: var(--bordeaux); font-size: 17px; font-weight: 600;
+      cursor: pointer; margin-bottom: 20px; padding: 6px 0;
+      transition: opacity 0.15s;
+    }
+    .back-btn:hover { opacity: 0.7; }
+    .home-btn {
+      background: var(--bordeaux); color: #fff;
+      border: none; border-radius: 20px;
+      padding: 9px 24px; font-weight: 700;
+      cursor: pointer; font-size: 17px;
+      box-shadow: 0 2px 8px rgba(127,5,65,0.3);
+      transition: background 0.15s;
+    }
+    .home-btn:hover { background: var(--bordeaux-dark); }
+
+    /* ─── SECTION HEADER ─────────────────────────────────── */
+    .section-header {
+      display: flex; align-items: center; gap: 12px;
+      margin-bottom: 20px;
+    }
+    .section-header h1 {
+      font-size: 20px; font-weight: 800; color: var(--text);
+    }
+    .section-badge {
+      background: var(--bordeaux-light);
+      color: var(--bordeaux);
+      border-radius: 20px;
+      padding: 3px 10px;
+      font-size: 17px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* ─── PANELS ─────────────────────────────────────────── */
+    .panel {
+      background: var(--white);
+      border-radius: var(--radius);
+      padding: 20px 22px;
+      margin-bottom: 18px;
+      box-shadow: var(--shadow-sm);
+      border: 1px solid var(--grey-border);
+    }
+    .panel h2 {
+      font-size: 17px; font-weight: 700;
+      color: var(--text); margin-bottom: 16px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid var(--grey-border);
+    }
+    .panel-sub { font-size: 18px; color: var(--text-light); margin-top: -10px; margin-bottom: 14px; }
+
+    /* ─── FORM ELEMENTS ──────────────────────────────────── */
+    .field-label {
+      font-size: 18px; font-weight: 700;
+      color: var(--text-light);
+      display: block;
+      margin: 14px 0 5px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .field-row { margin-bottom: 4px; overflow: hidden; }
+    select {
+      padding: 9px 12px;
+      border-radius: var(--radius-sm);
+      border: 1.5px solid var(--grey-border);
+      font-size: 17px;
+      font-family: inherit;
+      min-width: 200px; max-width: 100%; width: 100%;
+      text-overflow: ellipsis; overflow: hidden;
+      background: var(--white);
+      color: var(--text);
+      transition: border-color 0.15s;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7280' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 32px;
+    }
+    select:focus { outline: none; border-color: var(--bordeaux); box-shadow: 0 0 0 3px var(--bordeaux-mid); }
+    select:disabled { background: #f8f9fc; color: #aaa; cursor: not-allowed; }
+    input[type=file] { font-size: 17px; }
+
+    /* ─── GRID CONFRONTO ─────────────────────────────────── */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; min-width: 0; }
+    .grid-2 > div { min-width: 0; overflow: hidden; }
+    .corso-block {
+      background: var(--grey-bg);
+      border-radius: var(--radius-sm);
+      padding: 14px 16px;
+      border: 1.5px solid var(--grey-border);
+    }
+    .corso-block-label {
+      font-size: 17px; font-weight: 800;
+      text-transform: uppercase; letter-spacing: 0.07em;
+      color: var(--bordeaux); margin-bottom: 10px;
+    }
+
+    /* ─── TABLE ──────────────────────────────────────────── */
+    table { width: 100%; border-collapse: collapse; font-size: 17px; }
+    thead tr { background: var(--bordeaux-light); }
+    th {
+      padding: 10px 10px;
+      text-align: left;
+      font-weight: 700; font-size: 17px;
+      color: var(--bordeaux);
+      text-transform: uppercase; letter-spacing: 0.05em;
+      border-bottom: 2px solid var(--bordeaux-mid);
+    }
+    td { padding: 9px 10px; border-bottom: 1px solid var(--grey-border); color: var(--text); }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: var(--bordeaux-light); }
+
+    /* ─── CHART ──────────────────────────────────────────── */
+    .chart-container { position: relative; height: 280px; }
+
+    /* ─── INFO PANEL ─────────────────────────────────────── */
+    .info-panel {
+      background: linear-gradient(135deg, rgba(127,5,65,0.04) 0%, rgba(127,5,65,0.01) 100%);
+      border: 1px solid var(--bordeaux-mid);
+      border-left: 4px solid var(--bordeaux);
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      padding: 14px 16px;
+      margin-top: 12px;
+      display: none;
+      font-size: 17px;
+      line-height: 1.5;
+      animation: fadeIn 0.2s ease;
+    }
+    @keyframes fadeIn { from { opacity:0; transform: translateY(-4px); } to { opacity:1; transform: translateY(0); } }
+    .info-panel.visible { display: block; }
+    .info-panel-title { font-weight: 700; color: var(--bordeaux); font-size: 18px; margin-bottom: 6px; }
+    .info-panel-desc { color: #444; margin-bottom: 10px; font-size: 17px; }
+    .info-panel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin-top: 8px; }
+    .info-panel-item { font-size: 18px; background: white; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--grey-border); }
+    .info-panel-item strong { color: var(--bordeaux); display: block; font-size: 18px; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
+    .info-panel-cosa { background: white; border-radius: 6px; padding: 9px 12px; margin-top: 8px; font-size: 18px; color: #555; border: 1px solid var(--grey-border); }
+    .info-panel-cosa strong { color: var(--bordeaux); }
+
+    /* ─── STEP INDICATOR ─────────────────────────────────── */
+    .steps { display: flex; gap: 0; margin-bottom: 20px; }
+    .step {
+      flex: 1; display: flex; align-items: center; gap: 8px;
+      padding: 10px 14px; background: var(--white);
+      border: 1px solid var(--grey-border);
+      font-size: 18px; color: var(--text-light);
+      position: relative;
+    }
+    .step:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+    .step:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+    .step + .step { border-left: none; }
+    .step.active { background: var(--bordeaux-light); color: var(--bordeaux); font-weight: 700; border-color: var(--bordeaux-mid); }
+    .step.done { background: #f0faf3; color: #2e7d52; border-color: #b7e4c7; }
+    .step-num { width: 22px; height: 22px; border-radius: 50%; background: var(--grey-border); color: var(--text-light); font-size: 17px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .step.active .step-num { background: var(--bordeaux); color: white; }
+    .step.done .step-num { background: #2e7d52; color: white; }
+
+    /* ─── RESULTS SECTION ────────────────────────────────── */
+    .results-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .results-title { font-size: 17px; font-weight: 700; }
+    .anno-badge {
+      background: var(--bordeaux);
+      color: white;
+      border-radius: 20px;
+      padding: 3px 12px;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    /* ─── FOOTER BAR ─────────────────────────────────────── */
+    .bottom-bar {
+      display: flex; justify-content: flex-end; align-items: center;
+      padding-top: 12px; margin-top: 4px;
+      border-top: 1px solid var(--grey-border);
+    }
+
+    /* ─── RESPONSIVE ─────────────────────────────────────── */
+    @media (max-width: 600px) {
+      .grid-2 { grid-template-columns: 1fr; }
+      .home-cards { flex-direction: column; align-items: center; }
+      select { min-width: 100%; width: 100%; }
+      .info-panel-grid { grid-template-columns: 1fr; }
+      .steps { flex-direction: column; }
+      .step:first-child { border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+      .step:last-child { border-radius: 0 0 var(--radius-sm) var(--radius-sm); }
+      .step + .step { border-left: 1px solid var(--grey-border); border-top: none; }
+      .header { flex-direction: column; gap: 8px; }
+      .header-tagline { text-align: center; }
+    }
+
+    
+
+
+
+
+    /* ─── EVOLUZIONE ─────────────────────────────────────── */
+    .evo-table { width:100%; border-collapse:collapse; font-size:17px; table-layout:fixed; }
+    .evo-table th:nth-child(1), .evo-table td:nth-child(1) { width:auto; }
+    .evo-table th:nth-child(2), .evo-table td:nth-child(2) { width:13%; }
+    .evo-table th:nth-child(3), .evo-table td:nth-child(3) { width:13%; }
+    .evo-table th:nth-child(4), .evo-table td:nth-child(4) { width:17%; }
+    .evo-table th:nth-child(5), .evo-table td:nth-child(5) { width:17%; }
+    .evo-table thead tr { background: var(--bordeaux-light); }
+    .evo-table th { padding:9px 10px; text-align:left; font-size:17px; font-weight:700; color:var(--bordeaux); text-transform:uppercase; letter-spacing:0.05em; border-bottom:2px solid var(--bordeaux-mid); }
+    .evo-table td { padding:8px 10px; border-bottom:1px solid var(--grey-border); vertical-align:middle; }
+    .evo-table tbody tr:hover { background: var(--bordeaux-light); }
+    .delta-pos { color:#16a34a; font-weight:700; }
+    .delta-neg { color:#dc2626; font-weight:700; }
+    .delta-neu { color:#6b7280; }
+    .bar-wrap { width:120px; height:8px; background:#e5e7eb; border-radius:4px; overflow:hidden; display:inline-block; vertical-align:middle; margin-left:6px; }
+    .bar-fill { height:100%; border-radius:4px; }
+    .bar-pos { background:#16a34a; }
+    .bar-neg { background:#dc2626; }
+    .evo-summary { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:20px; }
+    .evo-card { background:var(--white); border-radius:var(--radius-sm); padding:14px 16px; text-align:center; border:1px solid var(--grey-border); box-shadow:var(--shadow-sm); }
+    .evo-card-num { font-size:24px; font-weight:800; margin-bottom:4px; }
+    .evo-card-label { font-size:18px; color:var(--text-light); }
+    @media(max-width:600px){ .evo-summary{grid-template-columns:1fr 1fr;} .bar-wrap{display:none;} }
+
+    /* ─── ACCORDION PER AMBITO ────────────────────────────── */
+    .evo-ambito-block { margin-bottom:12px; border:1px solid var(--grey-border); border-radius:var(--radius-sm); overflow:hidden; background:var(--white); }
+    .evo-ambito-header {
+      width:100%; display:flex; align-items:center; gap:12px; padding:14px 16px;
+      background:var(--white); border:none; cursor:pointer; text-align:left;
+      font-family:inherit; transition:background 0.15s;
+    }
+    .evo-ambito-header:hover { background: var(--bordeaux-light); }
+    .evo-ambito-chevron { color:var(--bordeaux); font-size:16px; flex-shrink:0; width:14px; }
+    .evo-ambito-nome { font-size:19px; font-weight:800; color:var(--text); flex:1; }
+    .evo-ambito-count { font-size:17px; color:var(--text-light); font-weight:600; }
+    .evo-ambito-tag { font-size:17px; font-weight:700; padding:2px 10px; border-radius:10px; }
+    .evo-ambito-tag.tag-pos { background:#dcfce7; color:#16a34a; }
+    .evo-ambito-tag.tag-neg { background:#fee2e2; color:#dc2626; }
+    .evo-ambito-panel { border-top:1px solid var(--grey-border); padding:14px 16px; }
+    @media(max-width:600px){
+      .evo-ambito-header { flex-wrap:wrap; }
+      .evo-ambito-nome { width:100%; order:1; }
+      .evo-ambito-count, .evo-ambito-tag { order:2; }
+    }
+
+
+    /* ─── TOOLTIP ────────────────────────────────────────── */
+    .tooltip-wrap { position:relative; display:inline-block; }
+    .tooltip-icon {
+      display:inline-flex; align-items:center; justify-content:center;
+      width:16px; height:16px; border-radius:50%;
+      background: var(--bordeaux); color:white;
+      font-size:18px; font-weight:800; cursor:pointer;
+      margin-left:5px; flex-shrink:0; vertical-align:middle;
+      border:none; padding:0; line-height:1;
+    }
+    .tooltip-icon.inverse-icon { background: #d97706; }
+    .tooltip-box {
+      display:none; position:fixed; z-index:9999;
+      background:#1a1d2e; color:white;
+      padding:10px 14px; border-radius:8px;
+      font-size:18px; line-height:1.5;
+      max-width:280px; box-shadow:0 8px 24px rgba(0,0,0,0.3);
+      pointer-events:none;
+    }
+    .tooltip-box.visible { display:block; }
+    .tooltip-box strong { color:#fbbf24; display:block; margin-bottom:3px; font-size:17px; text-transform:uppercase; }
+
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <div class="header" style="justify-content:center;"><div class="header-logo-wrap"><img src="data:image/jpeg;base64,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" alt="Università di Macerata"></div></div>
+
+  <div class="inner">
+
+
+  <!-- ADMIN PANEL placeholder - actual panel moved inside -->
+  <!-- HOME -->
+  <div class="section" id="sec-home">
+    <div class="home-hero">
+      <h1 class="home-title">Indicatori di Performance<br>dei Corsi di Studio</h1>
+      <p class="home-subtitle">Analizza e confronta le performance dei corsi dell'Università di Macerata</p>
+      <div id="home-status"></div>
+      <div class="home-cards" id="home-cards" style="display:none">
+        <div class="home-card" onclick="showSection('indicatori')">
+          <div class="card-label">Indicatori di Corso</div>
+          <div class="card-desc">Analisi della serie storica e riepilogo di tutti gli indicatori per corso</div>
+        </div>
+        <div class="home-card" onclick="showSection('confronto')">
+          <div class="card-label">Confronto Corsi</div>
+          <div class="card-desc">Metti a confronto due corsi su un indicatore specifico per anno</div>
+        </div>
+        <div class="home-card" onclick="showSection('evoluzione')">
+          <div class="card-label">Evoluzione nel Tempo</div>
+          <div class="card-desc">Quanto il corso è migliorato o peggiorato dal 2020 ad oggi per ogni indicatore</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- SEZIONE INDICATORI -->
+  <div class="section" id="sec-indicatori">
+    <button class="back-btn" onclick="showSection('home')">Home</button>
+    <div class="section-header">
+      <h1>Indicatori di Corso</h1>
+      <span class="section-badge">Analisi</span>
+    </div>
+
+    <div style="max-width:780px;margin:0 auto;">
+    <div class="panel">
+      <h2>Seleziona il corso e l&#39;indicatore</h2>
+      <p class="panel-sub">Scegli il corso di studio, la classe e l&#39;indicatore da analizzare</p>
+      <div class="field-row">
+        <label class="field-label">Corso di studio</label>
+        <select id="ind-corso"><option value="">Seleziona un corso...</option></select>
+      </div>
+      <div class="field-row">
+        <label class="field-label">Classe di laurea</label>
+        <select id="ind-classe" disabled><option value="">Prima seleziona un corso</option></select>
+      </div>
+      <div class="field-row">
+        <label class="field-label">Indicatore di performance</label>
+        <select id="ind-indicatore" disabled><option value="">Prima seleziona la classe</option></select>
+      </div>
+      <div class="info-panel" id="ind-info-panel"></div>
+    </div>
+    </div><!-- end selettori stretti -->
+
+    <div class="panel" id="ind-chart-wrap" style="display:none">
+      <h2></h2>
+      <div class="chart-container"><canvas id="ind-canvas"></canvas></div>
+    </div>
+
+    <div class="panel" id="ind-table-wrap" style="display:none">
+      <h2>Tutti gli indicatori — valore più recente</h2>
+      <p class="panel-sub">Clicca sull&#39;indicatore nel menu qui sopra per visualizzarne l&#39;andamento nel tempo</p>
+      <table id="ind-table">
+        <thead><tr><th>Indicatore</th><th>UniMC</th><th>Italia</th><th>Area</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="bottom-bar">
+      <button class="home-btn" onclick="showSection('home')">Home</button>
+    </div>
+  </div>
+
+  <!-- SEZIONE CONFRONTO -->
+  <div class="section" id="sec-confronto">
+    <button class="back-btn" onclick="showSection('home')">Home</button>
+    <div class="section-header">
+      <h1>Confronto tra Corsi</h1>
+      <span class="section-badge">Confronto</span>
+    </div>
+
+    <div style="max-width:780px;margin:0 auto;">
+    <div class="panel">
+      <h2>Seleziona i corsi da confrontare</h2>
+      <p class="panel-sub">Aggiungi quanti corsi vuoi, poi seleziona l&#39;indicatore e l&#39;anno</p>
+      <div id="cf-corsi-list"></div>
+      <button id="cf-add-btn" style="margin-top:14px;background:none;border:1.5px dashed var(--bordeaux);color:var(--bordeaux);border-radius:8px;padding:8px 18px;font-size:17px;font-weight:700;cursor:pointer;width:100%;transition:background 0.15s;" onmouseover="this.style.background='rgba(127,5,65,0.06)'" onmouseout="this.style.background='none'">+ Aggiungi corso</button>
+      <div class="field-row" style="margin-top:20px"><label class="field-label">Indicatore di performance</label><select id="cf-indicatore" disabled><option value="">Prima seleziona almeno due corsi</option></select></div>
+      <div class="info-panel" id="cf-info-panel"></div>
+      <div class="field-row"><label class="field-label">Anno di riferimento</label><select id="cf-anno" disabled><option value="">Prima seleziona l&#39;indicatore</option></select></div>
+    </div>
+    </div><!-- end selettori stretti -->
+
+    <div class="panel" id="cf-results" style="display:none">
+      <div class="results-header">
+        <span class="results-title">Risultati del confronto</span>
+        <span class="anno-badge" id="cf-anno-badge"></span>
+      </div>
+      <div id="cf-chart-wrap">
+        <div style="font-size:17px;font-weight:700;color:var(--text);margin-bottom:12px">Valore indicatore selezionato</div>
+        <div class="chart-container"><canvas id="cf-canvas"></canvas></div>
+      </div>
+      <div style="margin-top:22px; padding-top:18px; border-top:1px solid var(--grey-border)">
+        <div style="font-size:17px;font-weight:700;color:var(--text);margin-bottom:12px">Tutti gli indicatori — valore più recente</div>
+        <div id="cf-ind-tables"></div>
+      </div>
+    </div>
+
+    <div class="bottom-bar">
+      <button class="home-btn" onclick="showSection('home')">Home</button>
+    </div>
+    </div><!-- end evo inner -->
+  </div>
+
+
+</div><!-- end inner -->
+  <!-- SEZIONE EVOLUZIONE -->
+  <div class="section" id="sec-evoluzione">
+    <div style="max-width:780px;margin:0 auto;padding:0 20px;">
+    <button class="back-btn" onclick="showSection('home')">Home</button>
+    <div class="section-header">
+      <h1>Evoluzione nel Tempo</h1>
+      <span class="section-badge">Storico</span>
+    </div>
+
+    <div class="panel">
+      <h2>Seleziona il corso da analizzare</h2>
+      <p class="panel-sub">Verrà mostrata la variazione di ogni indicatore tra il primo e l&#39;ultimo anno disponibile</p>
+      <div class="field-row">
+        <label class="field-label">Corso di studio</label>
+        <select id="evo-corso"><option value="">Seleziona...</option></select>
+      </div>
+      <div class="field-row">
+        <label class="field-label">Classe di laurea</label>
+        <select id="evo-classe" disabled><option value="">Prima seleziona il corso</option></select>
+      </div>
+    </div>
+    </div><!-- end selettori stretti -->
+
+    <div style="max-width:1400px;margin:0 auto;padding:0 20px;">
+    <div id="evo-results" style="display:none">
+      <div class="panel">
+        <div class="evo-summary" id="evo-summary"></div>
+        <h2 id="evo-title"></h2>
+        <p class="panel-sub" id="evo-subtitle" style="margin-bottom:14px;"></p>
+        <div style="margin-bottom:14px;padding:12px 14px;background:var(--grey-bg);border-left:3px solid var(--bordeaux);border-radius:8px;font-size:18px;color:var(--text);line-height:1.6;">
+          <strong style="color:var(--bordeaux);">Come leggere il confronto con l&#39;Italia.</strong>
+          Per ogni indicatore, il valore più recente del corso viene messo a confronto con la media nazionale dello stesso anno:
+          una faccina <strong>rossa</strong> indica un valore inferiore all&#39;80% della media italiana, una faccina <strong>gialla</strong> segnala un valore compreso tra l&#39;80% e il 100% della media, mentre una faccina <strong>verde</strong> indica un valore superiore alla media nazionale.
+        </div>
+        <div id="evo-accordion"></div>
+        <div style="margin-top:10px;font-size:17px;color:var(--text-light);">
+          La variazione percentuale è calcolata tra il primo e l'ultimo anno con dati disponibili per ogni indicatore.<br>
+
+        </div>
+      </div>
+    </div>
+    </div><!-- end risultati larghi -->
+
+    <div style="max-width:780px;margin:0 auto;padding:0 20px;">
+    <div class="bottom-bar">
+      <button class="home-btn" onclick="showSection('home')">Home</button>
+    </div>
+    </div><!-- end evo inner -->
+  </div>
+
+
+  <!-- TOOLTIP MODAL -->
+  <div id="tip-modal" onclick="this.style.display='none'" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.45);align-items:center;justify-content:center;">
+    <div id="tip-box" onclick="event.stopPropagation()" style="background:#1a1d2e;color:white;padding:20px 22px;border-radius:12px;max-width:320px;width:90%;box-shadow:0 12px 40px rgba(0,0,0,0.4);position:relative;">
+      <button onclick="document.getElementById('tip-modal').style.display='none'" style="position:absolute;top:10px;right:12px;background:none;border:none;color:#9ca3af;font-size:18px;cursor:pointer;line-height:1;">&times;</button>
+      <div id="tip-content"></div>
+    </div>
+  </div>
+
+
+</div>
+<script>
+
+    const COLORI = {
+      "Archeologia e sviluppo dei territori": "rgb(137,20,106)",
+      "Beni culturali e turismo": "rgb(137,20,106)",
+      "Management dei beni culturali": "rgb(137,20,106)",
+      "Scienze dell'educazione e della formazione": "rgb(137,20,106)",
+      "Scienze della formazione primaria": "rgb(137,20,106)",
+      "Scienze pedagogiche": "rgb(137,20,106)",
+      "Storia e archeologia per l'innovazione": "rgb(137,20,106)",
+      "Teorie, culture e tecniche per il Servizio sociale": "rgb(137,20,106)",
+      "Turismo internazionale e gestione dei sistemi turistici": "rgb(137,20,106)",
+      "Politiche e programmazione dei servizi alla persona": "rgb(137,20,106)",
+      "Comunicazione e culture digitali": "rgb(0,123,192)",
+      "Data Analysis per le Scienze Sociali": "rgb(0,123,192)",
+      "Lingue e culture straniere occidentali e orientali": "rgb(0,123,192)",
+      "Lingue moderne per la comunicazione e la cooperazione internazionale": "rgb(0,123,192)",
+      "Lingue, culture e traduzione letteraria": "rgb(0,123,192)",
+      "Mediazione linguistica per l'impresa internazionale e i media digitali": "rgb(0,123,192)",
+      "Politiche europee e relazioni euromediterranee": "rgb(0,123,192)",
+      "Relazioni internazionali": "rgb(0,123,192)",
+      "Scienze della comunicazione": "rgb(0,123,192)",
+      "Scienze politiche e relazioni internazionali": "rgb(0,123,192)",
+      "GIURISPRUDENZA": "rgb(110,144,166)",
+      "Scienze giuridiche per l'innovazione": "rgb(110,144,166)",
+      "Scienze per i Servizi Giuridici": "rgb(110,144,166)",
+      "Studi giuridici Internazionali, Europei e Comparati": "rgb(110,144,166)",
+      "Filologia classica e moderna": "rgb(148,115,112)",
+      "Filosofia": "rgb(148,115,112)",
+      "Lettere": "rgb(148,115,112)",
+      "Scienze filosofiche": "rgb(148,115,112)",
+      "Economia e Management": "rgb(242,148,0)",
+      "Economia e Marketing per la Sostenibilita": "rgb(242,148,0)",
+      "Finanza e Mercati": "rgb(242,148,0)",
+      "Management e Marketing Internazionale": "rgb(242,148,0)",
+    };
+    const BORDEAUX = "rgb(127,5,65)";
+    const INDICATORI_INVERSI = new Set(["iC05", "iC24", "iC23", "iC27", "iC28"]);
+
+    // Raggruppamento degli indicatori per ambito tematico
+    const AMBITI = [
+      { nome: "Consistenza", codici: ["iC00a","iC00b","iC00d","iC00e","iC00f","iC00g","iC00h","iC14"] },
+      { nome: "Carriera studenti", codici: ["iC01","iC02","iC02bis","iC04","iC06","iC06bis","iC06ter","iC13","iC15","iC15BIS","iC16","iC16BIS","iC17","iC21","iC22","iC24"] },
+      { nome: "Internazionalizzazione", codici: ["iC10","iC10bis","iC11","iC12"] },
+      { nome: "Docenza", codici: ["iC05","iC08","iC09","iC19","iC19bis","iC19ter","iC27","iC28"] },
+      { nome: "Occupabilità", codici: ["iC07","iC07bis","iC07ter","iC26","iC26bis","iC26ter"] },
+      { nome: "Gradimento e attrattività", codici: ["iC18","iC23","iC25","iC03"] }
+    ];
+    const MAPPA_AMBITO_PER_CODICE = {};
+    AMBITI.forEach(a => a.codici.forEach(c => { MAPPA_AMBITO_PER_CODICE[c.toLowerCase()] = a.nome; }));
+    function getAmbito(cod) {
+      return MAPPA_AMBITO_PER_CODICE[String(cod).toLowerCase()] || "Altro";
+    }
+    function getColor(nome) { return COLORI[nome] || BORDEAUX; }
+    function r2(v) { if (v === null || v === undefined || v === "" || v === 0 || v === "0") return "n.p."; const n = parseFloat(v); return (isNaN(n) || n === 0) ? "n.p." : n.toFixed(2); }
+    function p2(v) { const n = parseFloat(v); return isNaN(n) ? null : n; }
+    function normalize(data) {
+      return data.map(r => { const nr = {}; Object.keys(r).forEach(k => { nr[k.trim()] = r[k]; }); return nr; });
+    }
+
+    let rawData = [];
+    let lineChart = null;
+    let barChart = null;
+
+    function showSection(id) {
+      document.querySelectorAll(".section").forEach(s => s.style.display = "none");
+      document.getElementById("sec-" + id).style.display = "block";
+      if (id === "indicatori") initIndicatori();
+      if (id === "confronto") initConfronto();
+      if (id === "evoluzione") initEvoluzione();
+    }
+
+    function renderHome(meta) {
+      const hasData = rawData.length > 0;
+      let statusHtml = '';
+      if (!hasData) {
+        statusHtml = '<p class="status-empty">I dati non sono ancora disponibili. Contatta l&#39;ufficio per informazioni.</p>';
+      } else if (meta && meta.pubblicatoIl) {
+        const data = new Date(meta.pubblicatoIl);
+        const dataFmt = data.toLocaleDateString("it-IT") + " alle " + data.toLocaleTimeString("it-IT", {hour:'2-digit', minute:'2-digit'});
+        statusHtml = '<p style="font-size:18px;color:var(--text-light);text-align:center;margin-bottom:20px;">' +
+          'Dati aggiornati il ' + dataFmt + '</p>';
+      }
+      document.getElementById("home-status").innerHTML = statusHtml;
+      document.getElementById("home-cards").style.display = hasData ? "flex" : "none";
+    }
+
+    function escapeHtmlLocal(str) {
+      return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    }
+
+    // Banner temporaneo che avvisa quando arriva una nuova pubblicazione
+    function mostraBannerAggiornamento() {
+      let banner = document.getElementById("update-banner");
+      if (!banner) {
+        banner = document.createElement("div");
+        banner.id = "update-banner";
+        banner.style.cssText = "position:fixed;top:16px;right:16px;background:#16a34a;color:#fff;padding:12px 18px;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,0.2);font-size:17px;font-weight:600;z-index:9999;transition:opacity 0.4s;";
+        document.body.appendChild(banner);
+      }
+      banner.textContent = "✓ Nuovi dati pubblicati dall'ufficio — pagina aggiornata";
+      banner.style.opacity = "1";
+      banner.style.display = "block";
+      clearTimeout(window._bannerTimeout);
+      window._bannerTimeout = setTimeout(() => { banner.style.opacity = "0"; setTimeout(() => banner.style.display = "none", 400); }, 4000);
+    }
+
+    function initIndicatori() {
+      const corsi = [...new Set(rawData.map(r => r.NOME_CORSO))].filter(Boolean).sort();
+      document.getElementById("ind-corso").innerHTML = '<option value="">Seleziona...</option>' + corsi.map(c => '<option value="'+c+'">'+c+'</option>').join("");
+      document.getElementById("ind-classe").innerHTML = '<option value="">Seleziona classe...</option>';
+      document.getElementById("ind-classe").disabled = true;
+      document.getElementById("ind-indicatore").innerHTML = '<option value="">Seleziona indicatore...</option>';
+      document.getElementById("ind-indicatore").disabled = true;
+      document.getElementById("ind-chart-wrap").style.display = "none";
+      document.getElementById("ind-table-wrap").style.display = "none";
+      if (lineChart) { lineChart.destroy(); lineChart = null; }
+    }
+
+    // Confronto multi-corso
+    let cfCorsi = []; // array di {corso, classe}
+    let cfNextId = 0;
+
+    function initConfronto() {
+      cfCorsi = [];
+      cfNextId = 0;
+      document.getElementById("cf-corsi-list").innerHTML = "";
+      document.getElementById("cf-indicatore").innerHTML = '<option value="">Prima seleziona almeno due corsi</option>';
+      document.getElementById("cf-indicatore").disabled = true;
+      document.getElementById("cf-anno").innerHTML = '<option value="">Prima seleziona l&#39;indicatore</option>';
+      document.getElementById("cf-anno").disabled = true;
+      document.getElementById("cf-results").style.display = "none";
+      if (barChart) { barChart.destroy(); barChart = null; }
+      // Aggiungi 2 corsi di default
+      addCfCorso();
+      addCfCorso();
+    }
+
+    function addCfCorso() {
+      const id = cfNextId++;
+      cfCorsi.push({ id, corso: "", classe: "" });
+      const corsi = [...new Set(rawData.map(r => r.NOME_CORSO))].filter(Boolean).sort();
+      const label = String.fromCharCode(65 + (id % 26)); // A, B, C...
+      const div = document.createElement("div");
+      div.id = "cf-block-" + id;
+      div.className = "corso-block";
+      div.style.cssText = "position:relative;margin-bottom:12px;";
+      div.innerHTML =
+        '<div class="corso-block-label" style="display:flex;justify-content:space-between;align-items:center;">' +
+          '<span>Corso ' + label + '</span>' +
+          (id >= 2 ? '<button onclick="removeCfCorso('+id+')" style="background:none;border:none;color:#999;font-size:18px;cursor:pointer;line-height:1;" title="Rimuovi">&times;</button>' : '') +
+        '</div>' +
+        '<div class="field-row"><label class="field-label">Corso di studio</label>' +
+          '<select id="cf-corso-'+id+'" onchange="onCfCorsoChange('+id+')">' +
+            '<option value="">Seleziona...</option>' +
+            corsi.map(c => '<option value="'+c+'">'+c+'</option>').join("") +
+          '</select>' +
+        '</div>' +
+        '<div class="field-row"><label class="field-label">Classe di laurea</label>' +
+          '<select id="cf-classe-'+id+'" disabled onchange="onCfClasseChange('+id+')">' +
+            '<option value="">Prima seleziona il corso</option>' +
+          '</select>' +
+        '</div>';
+      document.getElementById("cf-corsi-list").appendChild(div);
+    }
+
+    function removeCfCorso(id) {
+      cfCorsi = cfCorsi.filter(c => c.id !== id);
+      const el = document.getElementById("cf-block-" + id);
+      if (el) el.remove();
+      updateCfIndicatori();
+    }
+
+    function onCfCorsoChange(id) {
+      const corso = document.getElementById("cf-corso-" + id).value;
+      const selClasse = document.getElementById("cf-classe-" + id);
+      const entry = cfCorsi.find(c => c.id === id);
+      if (entry) { entry.corso = corso; entry.classe = ""; }
+      selClasse.innerHTML = '<option value="">Seleziona classe...</option>';
+      selClasse.disabled = !corso;
+      if (corso) {
+        const classi = [...new Set(rawData.filter(r => r.NOME_CORSO === corso).map(r => r.COD_CLASSE))].filter(Boolean);
+        selClasse.innerHTML += classi.map(c => '<option value="'+c+'">'+c+'</option>').join("");
+      }
+      updateCfIndicatori();
+    }
+
+    function onCfClasseChange(id) {
+      const classe = document.getElementById("cf-classe-" + id).value;
+      const entry = cfCorsi.find(c => c.id === id);
+      if (entry) entry.classe = classe;
+      updateCfIndicatori();
+    }
+
+    function attachListeners() {
+      document.getElementById("ind-corso").addEventListener("change", function() {
+        const corso = this.value;
+        const selClasse = document.getElementById("ind-classe");
+        const selInd = document.getElementById("ind-indicatore");
+        selClasse.innerHTML = '<option value="">Seleziona classe...</option>';
+        selInd.innerHTML = '<option value="">Seleziona indicatore...</option>';
+        selInd.disabled = true;
+        document.getElementById("ind-chart-wrap").style.display = "none";
+        document.getElementById("ind-table-wrap").style.display = "none";
+        if (lineChart) { lineChart.destroy(); lineChart = null; }
+        if (!corso) { selClasse.disabled = true; return; }
+        selClasse.disabled = false;
+        const classi = [...new Set(rawData.filter(r => r.NOME_CORSO === corso).map(r => r.COD_CLASSE))].filter(Boolean);
+        selClasse.innerHTML += classi.map(c => '<option value="'+c+'">'+c+'</option>').join("");
+      });
+      document.getElementById("ind-classe").addEventListener("change", function() {
+        const corso = document.getElementById("ind-corso").value;
+        const classe = this.value;
+        const selInd = document.getElementById("ind-indicatore");
+        selInd.innerHTML = '<option value="">Seleziona indicatore...</option>';
+        document.getElementById("ind-chart-wrap").style.display = "none";
+        if (!classe) { selInd.disabled = true; document.getElementById("ind-table-wrap").style.display = "none"; return; }
+        selInd.disabled = false;
+        const inds = [...new Set(rawData.filter(r => r.NOME_CORSO === corso && r.COD_CLASSE === classe).map(r => r.CODICE + " \u2013 " + r.DESCRIZIONE))];
+        selInd.innerHTML += inds.map(i => '<option value="'+i+'">'+i+'</option>').join("");
+        renderIndTable(corso, classe);
+      });
+      document.getElementById("ind-indicatore").addEventListener("change", function() {
+        const val = this.value;
+        showIndicatoreInfo(val, 'ind-info-panel');
+        if (!val) return;
+        const corso = document.getElementById("ind-corso").value;
+        const classe = document.getElementById("ind-classe").value;
+        renderIndChart(corso, classe, val.split(" \u2013 ")[0]);
+      });
+      document.getElementById("cf-add-btn").addEventListener("click", () => { addCfCorso(); updateCfIndicatori(); });
+      document.getElementById("cf-indicatore").addEventListener("change", function() { showIndicatoreInfo(this.value, 'cf-info-panel'); updateCfAnni(); });
+      document.getElementById("cf-anno").addEventListener("change", renderConfronto);
+      // Evoluzione listeners
+      document.getElementById("evo-corso").addEventListener("change", function() {
+        const corso = this.value;
+        const sel = document.getElementById("evo-classe");
+        sel.innerHTML = '<option value="">Seleziona classe...</option>';
+        sel.disabled = !corso;
+        document.getElementById("evo-results").style.display = "none";
+        if (!corso) return;
+        const classi = [...new Set(rawData.filter(r => r.NOME_CORSO === corso).map(r => r.COD_CLASSE))].filter(Boolean);
+        sel.innerHTML += classi.map(c => '<option value="'+c+'">'+c+'</option>').join("");
+      });
+      document.getElementById("evo-classe").addEventListener("change", function() {
+        const corso = document.getElementById("evo-corso").value;
+        const classe = this.value;
+        if (!classe) { document.getElementById("evo-results").style.display = "none"; return; }
+        buildEvoluzione(corso, classe);
+      });
+    }
+
+    function renderIndChart(corso, classe, codice) {
+      const rows = rawData.filter(r => r.NOME_CORSO === corso && r.COD_CLASSE === classe && r.CODICE === codice).sort((a,b) => a.ANNO - b.ANNO);
+      const wrap = document.getElementById("ind-chart-wrap");
+      if (!rows.length) { wrap.style.display = "none"; return; }
+      wrap.style.display = "block";
+      wrap.querySelector("h2").textContent = "Andamento temporale \u2014 " + codice;
+      if (lineChart) lineChart.destroy();
+      lineChart = new Chart(document.getElementById("ind-canvas"), {
+        type: "line",
+        data: {
+          labels: rows.map(r => r.ANNO),
+          datasets: [
+            { label: "UniMC", data: rows.map(r => p2(r.INDICATORE)), borderColor: BORDEAUX, backgroundColor: "transparent", tension: 0.3, pointRadius: 4, borderWidth: 2 },
+            { label: "Italia", data: rows.map(r => p2(r.IND_ITA_NOTELE)), borderColor: "rgb(255,152,0)", backgroundColor: "transparent", tension: 0.3, pointRadius: 4, borderWidth: 2 },
+            { label: "Area", data: rows.map(r => p2(r.IND_AREA_NOTELE)), borderColor: "rgb(76,175,80)", backgroundColor: "transparent", tension: 0.3, pointRadius: 4, borderWidth: 2 }
+          ]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "bottom" } }, scales: { y: { beginAtZero: false } } }
+      });
+    }
+
+    function renderIndTable(corso, classe) {
+      const all = rawData.filter(r => r.NOME_CORSO === corso && r.COD_CLASSE === classe);
+      const map = {};
+      all.forEach(r => { if (!map[r.CODICE] || r.ANNO > map[r.CODICE].ANNO) map[r.CODICE] = r; });
+      const rows = Object.values(map);
+      const wrap = document.getElementById("ind-table-wrap");
+      if (!rows.length) { wrap.style.display = "none"; return; }
+      wrap.style.display = "block";
+      document.querySelector("#ind-table tbody").innerHTML = rows.map(row =>
+        '<tr><td>'+row.CODICE+' \u2013 '+(row.DESCRIZIONE||'')+'</td><td>'+r2(row.INDICATORE)+'</td><td>'+r2(row.IND_ITA_NOTELE)+'</td><td>'+r2(row.IND_AREA_NOTELE)+'</td></tr>'
+      ).join("");
+    }
+
+    function updateCfIndicatori() {
+      const selInd = document.getElementById("cf-indicatore");
+      const selAnno = document.getElementById("cf-anno");
+      selInd.innerHTML = '<option value="">Prima seleziona almeno due corsi</option>';
+      selAnno.innerHTML = '<option value="">Prima seleziona l&#39;indicatore</option>';
+      selInd.disabled = true; selAnno.disabled = true;
+      document.getElementById("cf-results").style.display = "none";
+      const ready = cfCorsi.filter(c => c.corso && c.classe);
+      if (ready.length < 2) return;
+      const allInds = ready.flatMap(c => rawData.filter(r => r.NOME_CORSO === c.corso && r.COD_CLASSE === c.classe).map(r => r.CODICE + " – " + r.DESCRIZIONE));
+      const inds = [...new Set(allInds)];
+      selInd.innerHTML = '<option value="">Seleziona indicatore...</option>' + inds.map(i => '<option value="'+i+'">'+i+'</option>').join("");
+      selInd.disabled = false;
+    }
+
+
+    function updateCfAnni() {
+      const codice = document.getElementById("cf-indicatore").value.split(" – ")[0];
+      const selAnno = document.getElementById("cf-anno");
+      selAnno.innerHTML = '<option value="">Seleziona anno...</option>';
+      selAnno.disabled = true;
+      document.getElementById("cf-results").style.display = "none";
+      if (!codice) return;
+      const ready = cfCorsi.filter(c => c.corso && c.classe);
+      const anni = [...new Set(ready.flatMap(c => rawData.filter(r => r.NOME_CORSO === c.corso && r.COD_CLASSE === c.classe && r.CODICE === codice).map(r => String(r.ANNO))))].sort();
+      selAnno.innerHTML += anni.map(a => '<option value="'+a+'">'+a+'</option>').join("");
+      selAnno.disabled = false;
+    }
+
+
+    function renderConfronto() {
+      const indVal = document.getElementById("cf-indicatore").value;
+      const anno = document.getElementById("cf-anno").value;
+      if (!indVal || !anno) return;
+      const codice = indVal.split(" – ")[0];
+      const ready = cfCorsi.filter(c => c.corso && c.classe);
+      if (ready.length < 2) return;
+
+      const results = document.getElementById("cf-results");
+      results.style.display = "block";
+      const badge = document.getElementById('cf-anno-badge');
+      if (badge) badge.textContent = anno;
+
+      // Dati per ogni corso
+      const rows = ready.map(c => ({
+        corso: c.corso,
+        classe: c.classe,
+        row: rawData.find(r => r.NOME_CORSO === c.corso && r.COD_CLASSE === c.classe && r.CODICE === codice && String(r.ANNO) === anno)
+      }));
+
+      // Grafico a barre
+      const labels = rows.map(c => c.corso.length > 20 ? c.corso.slice(0,20)+"…" : c.corso);
+      const values = rows.map(c => c.row ? parseFloat(c.row.INDICATORE) : null);
+      const colors = rows.map(c => getColor(c.corso));
+      if (barChart) barChart.destroy();
+      barChart = new Chart(document.getElementById("cf-canvas"), {
+        type: "bar",
+        data: { labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 4 }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: false } } }
+      });
+
+      // Tabella tutti gli indicatori (più recente)
+      const allMaps = ready.map(c => {
+        const all = rawData.filter(r => r.NOME_CORSO === c.corso && r.COD_CLASSE === c.classe);
+        const map = {};
+        all.forEach(r => { if (!map[r.CODICE] || r.ANNO > map[r.CODICE].ANNO) map[r.CODICE] = r; });
+        return { corso: c.corso, map };
+      });
+      const codici = [...new Set(allMaps.flatMap(m => Object.keys(m.map)))].sort();
+      const shortNames = ready.map(c => c.corso.length > 18 ? c.corso.slice(0,18)+"…" : c.corso);
+      let html = '<table><thead><tr><th>Indicatore</th>' + shortNames.map(n => '<th>'+n+'</th>').join("") + '<th>Italia</th><th>Area</th></tr></thead><tbody>';
+      codici.forEach(cod => {
+        const firstRow = allMaps.map(m => m.map[cod]).find(Boolean);
+        const desc = firstRow?.DESCRIZIONE || '';
+        const italia = r2(firstRow ? firstRow.IND_ITA_NOTELE : NaN);
+        const area = r2(firstRow ? firstRow.IND_AREA_NOTELE : NaN);
+        html += '<tr><td>'+cod+' – '+desc+'</td>' + allMaps.map(m => '<td>'+r2(m.map[cod] ? m.map[cod].INDICATORE : NaN)+'</td>').join("") + '<td>'+italia+'</td><td>'+area+'</td></tr>';
+      });
+      html += '</tbody></table>';
+      document.getElementById("cf-ind-tables").innerHTML = html;
+    }
+
+
+
+    let primaConsegnaRicevuta = false; // distingue il primo caricamento dagli aggiornamenti successivi
+
+    document.addEventListener("DOMContentLoaded", () => {
+      attachListeners();
+
+      // Ripiego iniziale: mostra subito eventuali dati in cache locale,
+      // mentre si attende la risposta (più affidabile) da Firebase.
+      try {
+        const stored = localStorage.getItem("unimc_cruscotto_data");
+        if (stored) rawData = JSON.parse(stored);
+      } catch(e) { console.error(e); }
+
+      showSection("home");
+      renderHome();
+
+      // Collegamento in tempo reale: ogni volta che l'ufficio pubblica
+      // dati nuovi, questa funzione viene richiamata automaticamente.
+      if (window.firebaseDisponibile && window.firebaseAscoltaAggiornamenti) {
+        window.firebaseAscoltaAggiornamenti((datiRicevuti, errore) => {
+          if (errore) {
+            console.error("Errore connessione dati condivisi:", errore);
+            return;
+          }
+          if (datiRicevuti && datiRicevuti.dati) {
+            rawData = datiRicevuti.dati;
+            try {
+              localStorage.setItem("unimc_cruscotto_data", JSON.stringify(datiRicevuti.dati));
+            } catch(e) {}
+
+            if (primaConsegnaRicevuta) {
+              // Non è il primo caricamento: è un vero aggiornamento pubblicato ora
+              mostraBannerAggiornamento();
+            }
+            primaConsegnaRicevuta = true;
+
+            // Aggiorna la vista corrente, se siamo in home
+            renderHome(datiRicevuti);
+          }
+        });
+      }
+    }); // fine DOMContentLoaded
+
+
+
+    // =============================================
+    //   EVOLUZIONE NEL TEMPO
+    // =============================================
+
+    function initEvoluzione() {
+      const corsi = [...new Set(rawData.map(r => r.NOME_CORSO))].filter(Boolean).sort();
+      document.getElementById("evo-corso").innerHTML =
+        '<option value="">Seleziona...</option>' + corsi.map(c => '<option value="'+c+'">'+c+'</option>').join("");
+      document.getElementById("evo-classe").innerHTML = '<option value="">Prima seleziona il corso</option>';
+      document.getElementById("evo-classe").disabled = true;
+      document.getElementById("evo-results").style.display = "none";
+    }
+
+    function buildEvoluzione(corso, classe) {
+      const all = rawData.filter(r => r.NOME_CORSO === corso && r.COD_CLASSE === classe);
+      if (!all.length) return;
+
+      // Raggruppa per codice indicatore
+      const map = {};
+      all.forEach(r => {
+        if (!map[r.CODICE]) map[r.CODICE] = [];
+        map[r.CODICE].push(r);
+      });
+
+      const codici = Object.keys(map).sort();
+      let migliorati = 0, peggiorati = 0, stabili = 0;
+      const rows = [];
+
+      codici.forEach(cod => {
+        const serie = map[cod].sort((a,b) => a.ANNO - b.ANNO);
+        const desc = serie[0].DESCRIZIONE || '';
+        
+        // Primo e ultimo anno con valore numerico valido
+        const validi = serie.filter(r => !isNaN(parseFloat(r.INDICATORE)));
+        if (validi.length < 2) return;
+
+        const primo = validi[0];
+        const ultimo = validi[validi.length-1];
+        const vPrimo = parseFloat(primo.INDICATORE);
+        const vUltimo = parseFloat(ultimo.INDICATORE);
+        const vIta = parseFloat(ultimo.IND_ITA_NOTELE);
+
+        const delta = vUltimo - vPrimo;
+        const deltaPct = vPrimo !== 0 ? (delta / Math.abs(vPrimo)) * 100 : 0;
+
+        const inv = INDICATORI_INVERSI.has(cod);
+        if (Math.abs(deltaPct) < 1) stabili++;
+        else if ((!inv && delta > 0) || (inv && delta < 0)) migliorati++;
+        else peggiorati++;
+
+        // Vs Italia: sopra, sotto, n.d.
+        let vsItalia = '—';
+        let vsClass = '';
+        if (!isNaN(vIta) && vIta > 0) {
+          const diffIta = ((vUltimo - vIta) / vIta) * 100;
+          vsItalia = (diffIta >= 0 ? '+' : '') + diffIta.toFixed(1) + '%';
+          vsClass = diffIta >= 0 ? 'delta-pos' : 'delta-neg';
+        }
+
+        const sparkVals = serie.map(r => parseFloat(r.INDICATORE)).filter(v => !isNaN(v) && v !== 0);
+
+        // Serie storica completa (anno + indicatore + ita + area) per il confronto visivo
+        const serieConfronto = serie
+          .filter(r => !isNaN(parseFloat(r.INDICATORE)))
+          .map(r => ({
+            anno: r.ANNO,
+            ind: parseFloat(r.INDICATORE),
+            ita: parseFloat(r.IND_ITA_NOTELE),
+            area: parseFloat(r.IND_AREA_NOTELE)
+          }));
+
+        rows.push({ cod, desc, primo: primo.ANNO, ultimo: ultimo.ANNO, vPrimo, vUltimo, delta, deltaPct, vsItalia, vsClass, sparkVals, serieConfronto });
+      });
+
+      // Summary cards
+      // Legenda
+      const legenda = '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;font-size:18px;">' +
+        '<span><span style="background:#dcfce7;color:#16a34a;font-weight:700;padding:2px 8px;border-radius:10px;">migliorato</span> Il valore è andato nella direzione giusta</span>' +
+        '<span><span style="background:#fee2e2;color:#dc2626;font-weight:700;padding:2px 8px;border-radius:10px;">peggiorato</span> Il valore è andato nella direzione sbagliata</span>' +
+        '<span><span style="background:#f3f4f6;color:#6b7280;font-weight:700;padding:2px 8px;border-radius:10px;">stabile</span> Variazione inferiore all&#39;1%</span>' +
+        '<span style="color:var(--text-light);">&#9432; Clicca su <strong>i</strong> per dettagli su ogni indicatore</span>' +
+        '</div>';
+      document.getElementById("evo-summary").previousElementSibling?.remove();
+      const legendEl = document.createElement("div");
+      legendEl.innerHTML = legenda;
+      document.getElementById("evo-summary").insertAdjacentElement("beforebegin", legendEl);
+
+      document.getElementById("evo-summary").innerHTML =
+        '<div class="evo-card"><div class="evo-card-num delta-pos">+'+migliorati+'</div><div class="evo-card-label">Indicatori migliorati</div></div>' +
+        '<div class="evo-card"><div class="evo-card-num delta-neg">'+peggiorati+'</div><div class="evo-card-label">Indicatori peggiorati</div></div>' +
+        '<div class="evo-card"><div class="evo-card-num delta-neu">'+stabili+'</div><div class="evo-card-label">Stabili</div></div>';
+
+      // Title
+      const anniDisp = [...new Set(all.map(r => r.ANNO))].sort();
+      document.getElementById("evo-title").textContent = corso;
+      document.getElementById("evo-subtitle").textContent =
+        'Classe ' + classe + ' — Evoluzione dal ' + anniDisp[0] + ' al ' + anniDisp[anniDisp.length-1];
+
+      // Sort: peggiorati prima, poi migliorati, poi stabili
+      rows.sort((a,b) => {
+        const aInv = INDICATORI_INVERSI.has(a.cod);
+        const bInv = INDICATORI_INVERSI.has(b.cod);
+        // Peggiorato first: for normal higher=better, negative delta is bad; for inverse, positive delta is bad
+        const aScore = aInv ? a.deltaPct : -a.deltaPct;
+        const bScore = bInv ? b.deltaPct : -b.deltaPct;
+        return bScore - aScore;
+      });
+
+      // Raggruppa gli indicatori per ambito tematico, mantenendo l'ordine di AMBITI
+      const gruppi = {};
+      rows.forEach(row => {
+        const amb = getAmbito(row.cod);
+        if (!gruppi[amb]) gruppi[amb] = [];
+        gruppi[amb].push(row);
+      });
+      const ordineAmbiti = [...AMBITI.map(a => a.nome), "Altro"].filter(nome => gruppi[nome] && gruppi[nome].length);
+
+      function renderRigaTabella(row) {
+        const inverse = INDICATORI_INVERSI.has(row.cod);
+        // Per indicatori inversi: diminuzione = miglioramento
+        const isMigliorato = inverse ? row.deltaPct <= -1 : row.deltaPct >= 1;
+        const isPeggiorato = inverse ? row.deltaPct >= 1 : row.deltaPct <= -1;
+        const label = isMigliorato ? ' <span style="font-size:18px;background:#dcfce7;color:#16a34a;padding:1px 6px;border-radius:10px;font-weight:700;">migliorato</span>'
+                    : isPeggiorato ? ' <span style="font-size:18px;background:#fee2e2;color:#dc2626;padding:1px 6px;border-radius:10px;font-weight:700;">peggiorato</span>'
+                    : '';
+        const noteInverse = ' <button class="tooltip-icon' + (inverse ? ' inverse-icon' : '') + '" onclick="showTip(\'' + row.cod + '\',' + (inverse?'true':'false') + ')" title="Clicca per info">i</button>';
+
+        return '<tr>' +
+          '<td>' +
+            '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+              '<strong>' + row.cod + '</strong>' + noteInverse +
+              '<span style="font-size:18px;color:var(--text-light);white-space:nowrap;">' + row.primo + ' → ' + row.ultimo + '</span>' +
+              label +
+            '</div>' +
+            '<div style="color:var(--text-light);font-size:17px;margin-top:3px;">' + row.desc + '</div>' +
+          '</td>' +
+          '<td>' + r2(row.vPrimo) + '</td>' +
+          '<td>' + r2(row.vUltimo) + '</td>' +
+          '<td style="padding:6px 10px;">' + makeSpark(row.sparkVals, isMigliorato, isPeggiorato) + '</td>' +
+          '<td style="padding:6px 10px;">' + makeFaccinaConfronto(row.serieConfronto, row.cod) + '</td>' +
+          '</tr>';
+      }
+
+      const accordionHtml = ordineAmbiti.map((nomeAmbito, idx) => {
+        const righeAmbito = gruppi[nomeAmbito];
+        const nMiglior = righeAmbito.filter(r => {
+          const inv = INDICATORI_INVERSI.has(r.cod);
+          return inv ? r.deltaPct <= -1 : r.deltaPct >= 1;
+        }).length;
+        const nPeggior = righeAmbito.filter(r => {
+          const inv = INDICATORI_INVERSI.has(r.cod);
+          return inv ? r.deltaPct >= 1 : r.deltaPct <= -1;
+        }).length;
+        const panelId = "evo-ambito-" + idx;
+
+        return '<div class="evo-ambito-block">' +
+          '<button class="evo-ambito-header" onclick="toggleAmbito(\'' + panelId + '\')" aria-expanded="false">' +
+            '<span class="evo-ambito-chevron" id="' + panelId + '-chevron">&#9656;</span>' +
+            '<span class="evo-ambito-nome">' + nomeAmbito + '</span>' +
+            '<span class="evo-ambito-count">' + righeAmbito.length + ' indicatori</span>' +
+            (nMiglior > 0 ? '<span class="evo-ambito-tag tag-pos">' + nMiglior + ' migliorati</span>' : '') +
+            (nPeggior > 0 ? '<span class="evo-ambito-tag tag-neg">' + nPeggior + ' peggiorati</span>' : '') +
+          '</button>' +
+          '<div class="evo-ambito-panel" id="' + panelId + '" style="display:none;">' +
+            '<div style="overflow-x:auto">' +
+              '<table class="evo-table">' +
+                '<thead><tr>' +
+                  '<th>Indicatore</th><th>Valore iniziale</th><th>Valore attuale</th><th>Andamento</th><th>Confronto con l&#39;Italia</th>' +
+                '</tr></thead>' +
+                '<tbody>' + righeAmbito.map(renderRigaTabella).join("") + '</tbody>' +
+              '</table>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }).join("");
+
+      document.getElementById("evo-accordion").innerHTML = accordionHtml;
+
+      document.getElementById("evo-results").style.display = "block";
+    }
+
+
+
+
+
+    function makeFaccinaConfronto(serie, cod) {
+      if (!serie || !serie.length) return '<span style="color:#ccc;font-size:17px;">—</span>';
+
+      const inverse = INDICATORI_INVERSI.has(cod);
+
+      // Prendo solo l'anno più recente: è la situazione attuale del corso
+      const ultimo = serie[serie.length - 1];
+      if (isNaN(ultimo.ita) || ultimo.ita === 0) {
+        return '<span style="color:#ccc;font-size:17px;">n.d.</span>';
+      }
+
+      let cat;
+      if (!inverse) {
+        // Caso normale: un valore più alto è meglio
+        if (ultimo.ind > ultimo.ita) cat = 'verde';
+        else if (ultimo.ind >= ultimo.ita * 0.8) cat = 'giallo';
+        else cat = 'rosso';
+      } else {
+        // Indicatore "inverso": un valore più basso è meglio (es. abbandoni), quindi il confronto si specchia
+        if (ultimo.ind < ultimo.ita) cat = 'verde';
+        else if (ultimo.ind <= ultimo.ita * 1.2) cat = 'giallo';
+        else cat = 'rosso';
+      }
+
+      const emoji = { verde: '&#128994;&#128516;', giallo: '&#128993;&#128528;', rosso: '&#128308;&#128545;' };
+      const fraseSemplice = {
+        verde: 'Il corso va meglio della media nazionale',
+        giallo: 'Il corso è leggermente sotto la media nazionale',
+        rosso: 'Il corso è molto sotto la media nazionale'
+      };
+
+      const diffPct = ultimo.ita !== 0 ? ((ultimo.ind - ultimo.ita) / Math.abs(ultimo.ita)) * 100 : 0;
+      const segno = diffPct >= 0 ? '+' : '';
+
+      const tooltip = 'Nel ' + ultimo.anno + ', il valore di questo corso è ' + r2(ultimo.ind) +
+        ', mentre la media in Italia è ' + r2(ultimo.ita) + ' (' + segno + diffPct.toFixed(0) + '%).';
+
+      return '<div style="text-align:center;">' +
+        '<span title="' + tooltip + '" style="font-size:26px;cursor:help;line-height:1;">' + emoji[cat] + '</span>' +
+        '<div style="font-size:17px;color:var(--text);font-weight:600;margin-top:4px;max-width:120px;margin-left:auto;margin-right:auto;">' + fraseSemplice[cat] + '</div>' +
+        '<div style="font-size:18px;color:var(--text-light);margin-top:2px;">(' + ultimo.anno + ': ' + segno + diffPct.toFixed(0) + '% vs Italia)</div>' +
+        '</div>';
+    }
+
+    function makeSpark(vals, isMigliorato, isPeggiorato) {
+      if (!vals || vals.length < 2) return '<span style="color:#ccc;font-size:17px;">—</span>';
+      const W = 80, H = 28, PAD = 2;
+      const min = Math.min(...vals), max = Math.max(...vals);
+      const range = max - min || 1;
+      const color = isMigliorato ? '#16a34a' : isPeggiorato ? '#dc2626' : '#9ca3af';
+      const xs = vals.map((_, i) => PAD + (i / (vals.length - 1)) * (W - PAD*2));
+      const ys = vals.map(v => PAD + (1 - (v - min) / range) * (H - PAD*2));
+      const pts = xs.map((x, i) => x + ',' + ys[i]).join(' ');
+      // Filled area
+      const areaFirst = xs[0] + ',' + (H - PAD);
+      const areaLast = xs[xs.length-1] + ',' + (H - PAD);
+      const areaPath = 'M ' + areaFirst + ' L ' + pts.split(' ').join(' L ') + ' L ' + areaLast + ' Z';
+      return '<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" style="display:block;">' +
+        '<path d="'+areaPath+'" fill="'+color+'" fill-opacity="0.12"/>' +
+        '<polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>' +
+        '<circle cx="'+xs[xs.length-1]+'" cy="'+ys[ys.length-1]+'" r="2.5" fill="'+color+'"/>' +
+        '</svg>';
+    }
+
+    function toggleAmbito(panelId) {
+      const panel = document.getElementById(panelId);
+      const chevron = document.getElementById(panelId + "-chevron");
+      const header = chevron ? chevron.closest(".evo-ambito-header") : null;
+      const aperto = panel.style.display !== "none";
+      panel.style.display = aperto ? "none" : "block";
+      if (chevron) chevron.innerHTML = aperto ? "&#9656;" : "&#9662;";
+      if (header) header.setAttribute("aria-expanded", aperto ? "false" : "true");
+    }
+
+    function showTip(cod, isInverse) {
+      const info = INDICATORI_INFO[cod] || {};
+      const logica = isInverse
+        ? '<div style="margin-top:10px;padding:8px 10px;background:rgba(251,146,60,0.15);border-radius:6px;color:#fb923c;font-weight:600;font-size:18px;">&#9888; Per questo indicatore un valore pi&#249; BASSO &#232; migliore (es. meno abbandoni = meglio)</div>'
+        : '<div style="margin-top:10px;padding:8px 10px;background:rgba(134,239,172,0.12);border-radius:6px;color:#86efac;font-weight:600;font-size:18px;">&#10003; Per questo indicatore un valore pi&#249; ALTO &#232; migliore</div>';
+      document.getElementById('tip-content').innerHTML =
+        '<div style="font-size:17px;color:#fbbf24;font-weight:800;text-transform:uppercase;margin-bottom:6px;">' + cod + (info.titolo ? ' &mdash; ' + info.titolo : '') + '</div>' +
+        (info.breve ? '<div style="font-size:18px;color:rgba(255,255,255,0.75);line-height:1.5;margin-bottom:4px;">' + info.breve + '</div>' : '') +
+        logica;
+      document.getElementById('tip-modal').style.display = 'flex';
+    }
+
+    const INDICATORI_INFO = {
+  "iC01": {
+    titolo: 'Studenti con almeno 40 CFU nella durata normale',
+    breve: "Percentuale di studenti iscritti entro la durata normale del CdS che abbiano acquisito almeno 40 CFU nell'anno accademico.",
+    cosa_misura: "Misura la produttività degli studenti regolari: quanti di loro riescono a conseguire un buon numero di crediti durante l'anno.",
+    numeratore: "Iscritti regolari con almeno 40 CFU nell'anno accademico",
+    denominatore: 'Tutti gli iscritti regolari',
+    benchmark: 'Confrontato con la media Italia e Area geografica (atenei non telematici)'
+  },
+  "iC02": {
+    titolo: 'Laureati entro la durata normale',
+    breve: 'Percentuale di laureati che completano il corso entro la durata normale prevista (es. 3 anni per una triennale).',
+    cosa_misura: "Indica l'efficienza del corso: quanti studenti riescono a laurearsi nei tempi previsti senza ritardi.",
+    numeratore: 'Laureati regolari (entro la durata normale del corso)',
+    denominatore: 'Totale dei laureati',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC02bis": {
+    titolo: 'Laureati entro un anno oltre la durata normale',
+    breve: 'Percentuale di laureati che completano il corso entro un anno in più rispetto alla durata prevista.',
+    cosa_misura: 'Misura quanti studenti si laureano con un ritardo contenuto (massimo un anno oltre i tempi standard).',
+    numeratore: 'Laureati entro un anno oltre la durata normale',
+    denominatore: 'Totale dei laureati',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC03": {
+    titolo: 'Iscritti provenienti da altre Regioni',
+    breve: 'Percentuale di studenti iscritti al primo anno provenienti da una regione diversa da quella del corso.',
+    cosa_misura: 'Indica la capacità attrattiva del corso verso studenti di altre aree geografiche italiane (o stranieri).',
+    numeratore: "Iscritti al 1° anno che hanno conseguito il diploma in un'altra regione",
+    denominatore: 'Totale degli iscritti al 1° anno',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC04": {
+    titolo: 'Iscritti LM laureati in altro Ateneo',
+    breve: 'Percentuale di iscritti al 1° anno di una Laurea Magistrale che si sono laureati in un altro ateneo (anche estero).',
+    cosa_misura: "Misura l'attrattività della Laurea Magistrale verso studenti provenienti da altri atenei.",
+    numeratore: 'Iscritti al 1° anno LM con titolo triennale conseguito in un altro ateneo',
+    denominatore: 'Totale iscritti al 1° anno LM',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC05": {
+    titolo: 'Rapporto studenti regolari / docenti',
+    breve: 'Numero di studenti regolari per ogni docente di ruolo (professori e ricercatori a tempo indeterminato e determinato).',
+    cosa_misura: 'Misura il carico didattico: un valore alto indica molti studenti per docente, un valore basso più attenzione individuale.',
+    numeratore: 'Iscritti regolari',
+    denominatore: 'Docenti di ruolo che insegnano nel corso',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC06": {
+    titolo: 'Laureati L occupati a 1 anno dal titolo',
+    breve: 'Percentuale di laureati triennali (L) che risultano occupati a un anno dalla laurea (definizione ampia: include formazione retribuita).',
+    cosa_misura: 'Misura le prospettive occupazionali del corso a breve termine dopo la laurea triennale.',
+    numeratore: 'Laureati triennali occupati o in formazione retribuita a 1 anno',
+    denominatore: 'Laureati triennali intervistati da AlmaLaurea',
+    benchmark: 'Fonte: indagine AlmaLaurea'
+  },
+  "iC06bis": {
+    titolo: 'Laureati L occupati a 1 anno (definizione contrattuale)',
+    breve: 'Percentuale di laureati triennali occupati a un anno, con definizione più restrittiva: solo chi ha un contratto di lavoro regolare.',
+    cosa_misura: 'Variante più restrittiva di iC06: considera solo chi ha un contratto, escludendo attività informali.',
+    numeratore: 'Laureati con contratto di lavoro o formazione retribuita a 1 anno',
+    denominatore: 'Laureati triennali intervistati',
+    benchmark: 'Fonte: indagine AlmaLaurea'
+  },
+  "iC06ter": {
+    titolo: 'Laureati L occupati a 1 anno (esclusi non occupati in formazione non retribuita)',
+    breve: 'Come iC06bis ma depura il denominatore escludendo chi non lavora ed è in formazione non retribuita.',
+    cosa_misura: "Variante di iC06bis che corregge il denominatore per una stima più accurata dell'occupazione effettiva.",
+    numeratore: 'Laureati con contratto di lavoro o formazione retribuita',
+    denominatore: 'Laureati intervistati esclusi i non occupati in formazione non retribuita',
+    benchmark: 'Fonte: indagine AlmaLaurea'
+  },
+  "iC07": {
+    titolo: 'Laureati LM/LMCU occupati a 3 anni dal titolo',
+    breve: 'Percentuale di laureati magistrali e magistrali a ciclo unico occupati a tre anni dalla laurea.',
+    cosa_misura: 'Misura le prospettive occupazionali a medio termine dopo la laurea magistrale.',
+    numeratore: 'Laureati magistrali occupati o in formazione retribuita a 3 anni',
+    denominatore: 'Laureati magistrali intervistati da AlmaLaurea',
+    benchmark: 'Fonte: indagine AlmaLaurea'
+  },
+  "iC07bis": {
+    titolo: 'Laureati LM/LMCU occupati a 3 anni (definizione contrattuale)',
+    breve: 'Come iC07 ma con definizione più restrittiva: solo chi ha un contratto di lavoro regolare a 3 anni dalla laurea.',
+    cosa_misura: 'Variante più restrittiva di iC07.',
+    numeratore: 'Laureati magistrali con contratto a 3 anni',
+    denominatore: 'Laureati magistrali intervistati',
+    benchmark: 'Fonte: indagine AlmaLaurea'
+  },
+  "iC07ter": {
+    titolo: 'Laureati LM/LMCU occupati a 3 anni (denominatore corretto)',
+    breve: 'Come iC07bis ma con denominatore depurato dei non occupati in formazione non retribuita.',
+    cosa_misura: "Stima più accurata dell'occupazione magistrale a 3 anni.",
+    numeratore: 'Laureati magistrali con contratto a 3 anni',
+    denominatore: 'Intervistati esclusi i non occupati in formazione non retribuita',
+    benchmark: 'Fonte: indagine AlmaLaurea'
+  },
+  "iC08": {
+    titolo: 'Docenti di riferimento in SSD di base e caratterizzanti',
+    breve: 'Percentuale dei docenti di riferimento del corso che appartengono ai settori scientifico-disciplinari di base e caratterizzanti.',
+    cosa_misura: 'Misura la copertura qualificata della docenza: quanti docenti ufficiali del corso insegnano materie fondamentali.',
+    numeratore: 'Docenti di riferimento in SSD di base e caratterizzanti',
+    denominatore: 'Totale dei docenti di riferimento del corso',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC09": {
+    titolo: 'Qualità della ricerca dei docenti LM (QRDLM)',
+    breve: 'Indicatore della qualità della ricerca dei docenti che insegnano nelle lauree magistrali, basato sui risultati della VQR. Valore di riferimento: 0,8.',
+    cosa_misura: 'Valori superiori a 0,8 indicano che i docenti del corso hanno una produzione scientifica superiore alla media nazionale. Più è alto, migliore è la qualità della ricerca.',
+    numeratore: 'Somma dei valori R di ateneo per SSD pesati per i CFU erogati',
+    denominatore: 'Somma dei CFU degli insegnamenti',
+    benchmark: 'Valore di soglia: 0,8 (media nazionale)'
+  },
+  "iC10": {
+    titolo: "CFU all'estero degli studenti regolari (‰)",
+    breve: "Quota (per mille) di CFU conseguiti all'estero rispetto al totale dei CFU degli studenti regolari entro la durata normale.",
+    cosa_misura: "Misura l'internazionalizzazione del percorso di studio: quanta parte dell'esperienza formativa avviene all'estero.",
+    numeratore: "CFU conseguiti all'estero dagli iscritti regolari",
+    denominatore: 'Totale CFU conseguiti dagli iscritti regolari',
+    benchmark: 'Valore espresso per mille (‰)'
+  },
+  "iC10bis": {
+    titolo: "CFU all'estero su tutti gli studenti (‰)",
+    breve: 'Come iC10 ma calcolato su tutti gli iscritti (non solo i regolari).',
+    cosa_misura: 'Versione più ampia di iC10, include anche studenti fuori corso.',
+    numeratore: "CFU conseguiti all'estero da tutti gli iscritti",
+    denominatore: 'Totale CFU conseguiti da tutti gli iscritti',
+    benchmark: 'Valore espresso per mille (‰)'
+  },
+  "iC11": {
+    titolo: "Laureati con almeno 12 CFU all'estero (‰)",
+    breve: "Percentuale (per mille) di laureati regolari che hanno acquisito almeno 12 CFU all'estero.",
+    cosa_misura: "Misura quanti laureati hanno avuto un'esperienza internazionale significativa durante il percorso.",
+    numeratore: "Laureati regolari con almeno 12 CFU all'estero",
+    denominatore: 'Totale laureati regolari',
+    benchmark: 'Valore espresso per mille (‰)'
+  },
+  "iC12": {
+    titolo: "Iscritti con titolo precedente conseguito all'estero (‰)",
+    breve: 'Percentuale (per mille) di iscritti al 1° anno che hanno conseguito il titolo di accesso in un paese straniero.',
+    cosa_misura: "Misura l'attrattività internazionale del corso verso studenti stranieri o italiani che hanno studiato all'estero.",
+    numeratore: "Iscritti al 1° anno con titolo di accesso conseguito all'estero",
+    denominatore: 'Totale iscritti al 1° anno',
+    benchmark: 'Valore espresso per mille (‰)'
+  },
+  "iC13": {
+    titolo: 'CFU conseguiti al 1° anno su CFU da conseguire',
+    breve: 'Percentuale media di CFU conseguiti dagli immatricolati nel primo anno rispetto ai CFU previsti dal piano di studi.',
+    cosa_misura: 'Indica quanto gli studenti del primo anno riescono a tenere il passo con il programma previsto. Un valore vicino al 100% indica buona progressione.',
+    numeratore: 'CFU medi conseguiti dagli immatricolati nel 1° anno',
+    denominatore: 'CFU previsti dal corso per il 1° anno',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC14": {
+    titolo: 'Studenti che proseguono al 2° anno nello stesso corso',
+    breve: 'Percentuale di immatricolati che si iscrivono al 2° anno nello stesso corso di studio.',
+    cosa_misura: 'Misura la retention del corso: quanti studenti non abbandonano dopo il primo anno. Un valore alto indica un corso che mantiene i propri studenti.',
+    numeratore: 'Immatricolati iscritti al 2° anno dello stesso corso',
+    denominatore: 'Totale immatricolati',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC15": {
+    titolo: 'Proseguono al 2° anno con almeno 20 CFU',
+    breve: 'Percentuale di immatricolati che si iscrivono al 2° anno avendo acquisito almeno 20 CFU nel primo anno.',
+    cosa_misura: 'Versione più selettiva di iC14: misura quanti studenti continuano il corso avendo già una base solida di crediti.',
+    numeratore: 'Immatricolati con ≥20 CFU iscritti al 2° anno dello stesso corso',
+    denominatore: 'Totale immatricolati',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC15bis": {
+    titolo: 'Proseguono al 2° anno con almeno 1/3 dei CFU previsti',
+    breve: 'Percentuale di immatricolati che si iscrivono al 2° anno avendo acquisito almeno 1/3 dei CFU previsti per il 1° anno.',
+    cosa_misura: 'Come iC15 ma la soglia è proporzionale ai CFU del piano di studi: utile per confronti tra corsi con carichi diversi.',
+    numeratore: 'Immatricolati con ≥1/3 CFU previsti iscritti al 2° anno',
+    denominatore: 'Totale immatricolati',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC16": {
+    titolo: 'Proseguono al 2° anno con almeno 40 CFU',
+    breve: 'Percentuale di immatricolati che si iscrivono al 2° anno avendo acquisito almeno 40 CFU nel primo anno.',
+    cosa_misura: 'Versione molto selettiva: misura quanti studenti proseguono con un ritmo di studi molto sostenuto (quasi un anno completo di crediti).',
+    numeratore: 'Immatricolati con ≥40 CFU iscritti al 2° anno dello stesso corso',
+    denominatore: 'Totale immatricolati',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC16bis": {
+    titolo: 'Proseguono al 2° anno con almeno 2/3 dei CFU previsti',
+    breve: 'Percentuale di immatricolati che si iscrivono al 2° anno avendo acquisito almeno 2/3 dei CFU previsti.',
+    cosa_misura: 'Come iC16 ma proporzionale: indica chi ha completato la maggior parte del programma del primo anno.',
+    numeratore: 'Immatricolati con ≥2/3 CFU previsti iscritti al 2° anno',
+    denominatore: 'Totale immatricolati',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC17": {
+    titolo: 'Immatricolati laureati entro N+1 anni',
+    breve: 'Percentuale di immatricolati che si laureano nello stesso corso entro un anno oltre la durata normale (es. entro 4 anni per una triennale).',
+    cosa_misura: 'Indicatore longitudinale: segue la coorte degli immatricolati e misura quanti completano il percorso con un ritardo contenuto.',
+    numeratore: 'Immatricolati laureati entro N+1 anni (N = durata normale)',
+    denominatore: 'Totale immatricolati nella coorte di riferimento',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC18": {
+    titolo: 'Laureati che si iscriverebbero di nuovo',
+    breve: 'Percentuale di laureati che, se potessero tornare indietro, si iscriverebbero di nuovo allo stesso corso nello stesso ateneo.',
+    cosa_misura: 'Misura la soddisfazione complessiva degli studenti: un indicatore diretto di qualità percepita del corso.',
+    numeratore: "Laureati che rispondono 'Sì, allo stesso corso di questo Ateneo'",
+    denominatore: "Laureati rispondenti all'indagine AlmaLaurea",
+    benchmark: 'Fonte: indagine AlmaLaurea sul Profilo dei Laureati'
+  },
+  "iC19": {
+    titolo: 'Ore di docenza da docenti a tempo indeterminato',
+    breve: 'Percentuale di ore di lezione erogate da docenti assunti a tempo indeterminato (professori e ricercatori di ruolo) sul totale delle ore.',
+    cosa_misura: "Misura la stabilità del corpo docente: più è alto, maggiore è la quota di didattica affidata a docenti stabili dell'ateneo.",
+    numeratore: 'Ore erogate da docenti a tempo indeterminato',
+    denominatore: 'Totale ore di docenza erogate nel corso',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC19bis": {
+    titolo: 'Ore di docenza da TI + ricercatori tipo B',
+    breve: 'Come iC19 ma include anche i ricercatori a tempo determinato di tipo B (tenure-track, prossimi alla stabilizzazione).',
+    cosa_misura: 'Versione estesa di iC19: considera anche chi è in percorso di stabilizzazione accademica.',
+    numeratore: 'Ore erogate da docenti TI + ricercatori tipo B',
+    denominatore: 'Totale ore di docenza erogate',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC19ter": {
+    titolo: 'Ore di docenza da TI + ricercatori tipo A e B',
+    breve: 'Come iC19bis ma include anche i ricercatori di tipo A (a tempo determinato non tenure-track).',
+    cosa_misura: 'La misura più ampia della copertura docente strutturata: include tutti i ricercatori a tempo determinato.',
+    numeratore: 'Ore erogate da docenti TI + ricercatori tipo A e B',
+    denominatore: 'Totale ore di docenza erogate',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC21": {
+    titolo: 'Studenti che proseguono nel sistema universitario al 2° anno',
+    breve: 'Percentuale di immatricolati che risultano iscritti al 2° anno in qualsiasi corso universitario (anche diverso o altro ateneo).',
+    cosa_misura: 'Misura la retention nel sistema universitario in generale, non nel singolo corso: include chi ha cambiato corso o ateneo.',
+    numeratore: 'Immatricolati iscritti in un corso universitario al 2° anno',
+    denominatore: 'Totale immatricolati',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC22": {
+    titolo: 'Immatricolati laureati entro la durata normale',
+    breve: 'Percentuale di immatricolati che si laureano nello stesso corso esattamente entro la durata normale prevista.',
+    cosa_misura: 'Indicatore longitudinale: misura quanti completano il percorso puntualmente, senza alcun ritardo.',
+    numeratore: 'Immatricolati laureati entro la durata normale',
+    denominatore: 'Totale immatricolati della coorte',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC23": {
+    titolo: 'Immatricolati che cambiano corso nello stesso ateneo',
+    breve: "Percentuale di immatricolati che al 2° anno sono ancora nell'ateneo ma in un corso diverso da quello di prima iscrizione.",
+    cosa_misura: 'Misura il tasso di trasferimento interno: quanti studenti cambiano corso rimanendo nello stesso ateneo.',
+    numeratore: 'Immatricolati iscritti al 2° anno in un corso diverso dello stesso ateneo',
+    denominatore: 'Totale immatricolati',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC24": {
+    titolo: 'Abbandoni dopo N+1 anni',
+    breve: 'Percentuale di immatricolati che, dopo N+1 anni (N = durata normale del corso), non risultano più iscritti né laureati nel corso.',
+    cosa_misura: "Misura il tasso di abbandono complessivo del corso nel lungo periodo: include chi ha lasciato l'università, cambiato corso o ateneo.",
+    numeratore: 'Immatricolati non più iscritti né laureati nel corso dopo N+1 anni',
+    denominatore: 'Totale immatricolati della coorte',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC25": {
+    titolo: 'Laureati soddisfatti del corso',
+    breve: "Percentuale di laureati complessivamente soddisfatti del corso di studio (risposta 'decisamente sì' o 'più sì che no').",
+    cosa_misura: "Misura diretta della soddisfazione degli studenti: un indicatore chiave della qualità percepita dell'esperienza formativa.",
+    numeratore: 'Laureati che rispondono positivamente alla soddisfazione',
+    denominatore: "Laureati rispondenti all'indagine AlmaLaurea",
+    benchmark: 'Fonte: indagine AlmaLaurea sul Profilo dei Laureati'
+  },
+  "iC26": {
+    titolo: 'Laureati LM/LMCU occupati a 1 anno',
+    breve: 'Percentuale di laureati magistrali occupati a un anno dalla laurea (definizione ampia: include formazione retribuita).',
+    cosa_misura: "Misura l'inserimento lavorativo a breve termine dei laureati magistrali.",
+    numeratore: 'Laureati magistrali occupati o in formazione retribuita a 1 anno',
+    denominatore: 'Laureati magistrali intervistati',
+    benchmark: 'Fonte: indagine AlmaLaurea'
+  },
+  "iC26bis": {
+    titolo: 'Laureati LM/LMCU occupati a 1 anno (contrattuale)',
+    breve: 'Come iC26 ma con definizione più restrittiva: solo chi ha un contratto di lavoro regolare.',
+    cosa_misura: 'Variante restrittiva di iC26.',
+    numeratore: 'Laureati magistrali con contratto a 1 anno',
+    denominatore: 'Laureati magistrali intervistati',
+    benchmark: 'Fonte: indagine AlmaLaurea'
+  },
+  "iC26ter": {
+    titolo: 'Laureati LM/LMCU occupati a 1 anno (denominatore corretto)',
+    breve: 'Come iC26bis ma con denominatore depurato dei non occupati in formazione non retribuita.',
+    cosa_misura: "Stima più accurata dell'occupazione magistrale a 1 anno.",
+    numeratore: 'Laureati magistrali con contratto a 1 anno',
+    denominatore: 'Intervistati esclusi i non occupati in formazione non retribuita',
+    benchmark: 'Fonte: indagine AlmaLaurea'
+  },
+  "iC27": {
+    titolo: 'Rapporto studenti / docenti equivalenti',
+    breve: 'Numero di iscritti per docente equivalente a tempo pieno (FTE), pesato per le ore di docenza erogate.',
+    cosa_misura: 'Misura il carico didattico in modo più accurato di iC05: ogni docente conta proporzionalmente alle ore che insegna nel corso.',
+    numeratore: 'Numero di iscritti',
+    denominatore: 'Somma ore di docenza / 120 (ore attese per un prof. ordinario)',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+  "iC28": {
+    titolo: 'Rapporto iscritti 1° anno / docenti 1° anno (equivalenti)',
+    breve: 'Come iC27 ma limitato agli iscritti e ai docenti del primo anno di corso.',
+    cosa_misura: 'Misura il carico specifico del primo anno: più studenti arrivano, più è importante avere docenti disponibili.',
+    numeratore: 'Iscritti al 1° anno',
+    denominatore: 'Docenti equivalenti degli insegnamenti del 1° anno',
+    benchmark: 'Confrontato con la media Italia e Area geografica'
+  },
+};
+
+    function extractCodice(val) {
+      if (!val) return null;
+      // val is like "iC01 – Percentuale di..." or "IC01 – ..."
+      const m = val.match(/^([a-zA-Z]+\d+[a-zA-Z]*)/);
+      return m ? m[1].toLowerCase().replace(/^ic/, 'iC') : null;
+    }
+
+    function normalizeCode(raw) {
+      if (!raw) return null;
+      // Handle iC15BIS -> iC15bis etc.
+      return raw.replace(/([a-zA-Z]+)(\d+)([a-zA-Z]*)/, (_, a, n, s) => {
+        const base = a.toLowerCase().replace('ic','iC');
+        return base + n + s.toLowerCase();
+      });
+    }
+
+    function showIndicatoreInfo(val, containerId) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      if (!val) { container.classList.remove('visible'); return; }
+      const raw = val.split(' \u2013 ')[0].trim();
+      const cod = normalizeCode(raw);
+      const info = INDICATORI_INFO[cod];
+      if (!info) { container.classList.remove('visible'); return; }
+      container.innerHTML =
+        '<div class="info-panel-title">' + cod + ' \u2014 ' + info.titolo + '</div>' +
+        '<div class="info-panel-desc">' + info.breve + '</div>' +
+        '<div class="info-panel-cosa"><strong>Cosa misura: </strong>' + info.cosa_misura + '</div>' +
+        '<div class="info-panel-grid">' +
+          '<div class="info-panel-item"><strong>Numeratore</strong>' + info.numeratore + '</div>' +
+          '<div class="info-panel-item"><strong>Denominatore</strong>' + info.denominatore + '</div>' +
+          '<div class="info-panel-item" style="grid-column:1/-1"><strong>Benchmark</strong>' + info.benchmark + '</div>' +
+        '</div>';
+      container.classList.add('visible');
+    }
+
+</script>
+</body>
+</html>
